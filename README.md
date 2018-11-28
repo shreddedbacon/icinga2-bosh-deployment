@@ -1,4 +1,7 @@
 # Icinga2 Deployment
+```
+NOTE: This should probably not be used in any capacity, it has been made as a proof of concept
+```
 
 Icinga2 deployment uses `docker-boshrelease`, `bosh-dns-aliases`, and `icinga2-boshrelease`
 
