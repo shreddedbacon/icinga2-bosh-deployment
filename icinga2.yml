@@ -1,0 +1,153 @@
+---
+name: icinga2
+
+instance_groups:
+- name: icinga2
+  azs: [z1]
+  instances: 1
+  persistent_disk: default
+  vm_type: default
+  stemcell: default
+  networks: [{name: default}]
+  jobs:
+  - name: bosh-dns-aliases
+    release: bosh-dns-aliases
+    properties:
+      aliases:
+      # reference mysql deployment to get mysql proxy server ip addresses and present them as mysql.cf.internal to this instance group
+      - domain: mysql.cf.internal
+        targets:
+          - deployment: cf_mysql
+            domain: bosh
+            instance_group: proxy
+            network: default
+            query: '*'
+  # deploy icinga specific bosh resources (ssl?)
+  - name: icinga2
+    release: icinga-boshrelease
+    properties:
+      tls_cacert: "((icinga_tls.ca))"
+      tls_cert: "((icinga_tls.certificate))"
+      tls_key: "((icinga_tls.private_key))"
+  # deploy docker
+  - name: docker
+    release: docker
+    properties:
+      tcp_address: 0.0.0.0
+      tls_cacert: "((docker-tls.ca))"
+      tls_cert: "((docker-tls.certificate))"
+      tls_key: "((docker-tls.private_key))"
+  # deploy the actual containers
+  - name: containers
+    release: docker
+    properties:
+      containers:
+        - name: icinga2
+          timeout: 300
+          image: "jordan/icinga2"
+          hostname: icinga2
+          bind_ports:
+            - "9443:443"
+            - "5666:5665"
+          expose_ports:
+            - "5665"
+          volumes:
+            - "/var/vcap/store/icinga2/etcapachessl:/etc/apache2/ssl"
+            - "/var/vcap/store/icinga2/etcicinga2:/etc/icinga2"
+            - "/var/vcap/store/icinga2/etcicingaweb2:/etc/icingaweb2"
+            - "/var/vcap/store/icinga2/varlibicinga:/var/lib/icinga2"
+            - "/var/vcap/store/icinga2/phpsessions:/var/lib/php/sessions"
+          env_vars:
+            - ICINGA2_FEATURE_GRAPHITE=1
+            - ICINGA2_FEATURE_GRAPHITE_HOST=graphite
+            - ICINGA2_FEATURE_GRAPHITE_PORT=2003
+            - ICINGA2_FEATURE_GRAPHITE_URL=http://graphite
+            - ICINGA2_FEATURE_DIRECTOR_PASS=((icinga_api_pass))
+            - DEFAULT_MYSQL_HOST=mysql.cf.internal
+            #- MYSQL_ROOT_PASSWORD= ### SEE OPERATIONS FILE
+          links:
+            - graphite:graphite
+          depends_on:
+            - graphite
+        - name: graphite
+          timeout: 300
+          hostname: graphite
+          image: graphiteapp/graphite-statsd:latest
+          volumes:
+            - "/var/vcap/store/graphite/conf:/opt/graphite/conf"
+            - "/var/vcap/store/graphite/storage:/opt/graphite/storage"
+            - "/var/vcap/store/graphite/logs:/var/log/graphite"
+            - "/var/vcap/store/graphite/carbon:/var/log/carbon"
+        - name: dashinga
+          timeout: 300
+          depends_on:
+            - icinga2
+          hostname: dashinga
+          image: shreddedbacon/dashing-icinga
+          bind_ports:
+            - "8005:8005"
+          links:
+            icinga2:icinga2
+          env_vars:
+            - ICINGA2_API_HOST=icinga2
+            - ICINGA2_API_PORT=5665
+            - ICINGA2_API_USERNAME=icinga2-director
+            - ICINGA2_API_PASSWORD=((icinga_api_pass))
+            - ICINGAWEB2_URL=https://((icinga_hostname)):9443/icingaweb2
+
+
+variables:
+# docker certificate
+- name: docker-ca
+  type: certificate
+  options:
+    is_ca: true
+    common_name: dockerCA
+- name: docker-tls
+  type: certificate
+  options:
+    ca: docker-ca
+    common_name: docker
+    extended_key_usage:
+    - client_auth
+
+# icinga api password
+- name: icinga_api_pass
+  type: password
+
+# icinga ssl certificate
+- name: icinga_ca
+  type: certificate
+  options:
+    is_ca: true
+    common_name: icingaCA
+- name: icinga_tls
+  type: certificate
+  options:
+    ca: icinga_ca
+    common_name: ((icinga_hostname))
+    alternative_names: [localhost]
+
+stemcells:
+- alias: default
+  os: ubuntu-trusty
+  version: 3586.26
+
+update:
+  canaries: 0
+  canary_watch_time: 1000-60000
+  update_watch_time: 1000-60000
+  max_in_flight: 32
+  serial: false
+
+releases:
+- name: "docker"
+  version: "33.0.0"
+  url: "https://bosh.io/d/github.com/cf-platform-eng/docker-boshrelease?v=33.0.0"
+  sha1: "4051195b3868cdb236c172f7e96cb474f2d4728f"
+- name: "bosh-dns-aliases"
+  version: "0.0.3"
+  url: "https://bosh.io/d/github.com/cloudfoundry/bosh-dns-aliases-release?v=0.0.3"
+  sha1: "b0d0a0350ed87f1ded58b2ebb469acea0e026c"
+- name: icinga-boshrelease
+  version: latest
