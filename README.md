@@ -1,5 +1,5 @@
 # Icinga2 Deployment
-![note][(https://github.com/shreddedbacon/icinga2-bosh-deployment/alert.png)
+NOTE!!!!
 This should probably not be used in any capacity, it has been made as a proof of concept
 
 Icinga2 deployment uses `docker-boshrelease`, `bosh-dns-aliases`, and `icinga2-boshrelease`
